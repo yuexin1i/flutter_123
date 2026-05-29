@@ -3,11 +3,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import os
-from transformers import transform_bus_eta, transform_youbike_status, transform_tra_live, transform_thsr_timetable
+import time
+from transformers import (
+    transform_bus_eta,
+    transform_youbike_status,
+    transform_tra_live,
+    transform_thsr_timetable,
+    transform_tra_alert,     # 新增
+    transform_thsr_alert,    # 新增
+    transform_bus_alert      # 新增
+)
 
 app = FastAPI(title="Chiayi Transport Middleware API")
 
-# 允許 Flutter (特別是 Web 版) 跨網域請求
+# 允許 Flutter 跨網域請求
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,35 +24,173 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ⚠️ 這裡要放入你取得 TDX Token 的邏輯
-TDX_TOKEN = os.getenv("TDX_TOKEN", "YOUR_TEMP_TOKEN")
-HEADERS = {"authorization": f"Bearer {TDX_TOKEN}", "Accept-Encoding": "gzip"}
+# ==========================================
+# TDX Token 管理機制
+# ==========================================
+# ⚠️ 請確保在環境變數中設定這兩個值
+TDX_CLIENT_ID = os.getenv("TDX_CLIENT_ID", "YOUR_CLIENT_ID")
+TDX_CLIENT_SECRET = os.getenv("TDX_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+
+# 儲存 Token 及其過期時間
+_token_cache = {
+    "access_token": None,
+    "expires_at": 0
+}
+
+async def get_valid_token():
+    """取得有效的 TDX Token，若過期則重新獲取"""
+    current_time = time.time()
+
+    # 提早 300 秒 (5分鐘) 視為過期，避免極端情況
+    if _token_cache["access_token"] and current_time < _token_cache["expires_at"] - 300:
+        return _token_cache["access_token"]
+
+    token_url = 'https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token'
+    data = {
+        'grant_type': 'client_credentials',
+        'client_id': TDX_CLIENT_ID,
+        'client_secret': TDX_CLIENT_SECRET
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(token_url, data=data)
+            response.raise_for_status()
+            res_json = response.json()
+
+            _token_cache["access_token"] = res_json.get("access_token")
+            # 通常 expires_in 是一天 (86400 秒)
+            _token_cache["expires_at"] = current_time + res_json.get("expires_in", 86400)
+
+            return _token_cache["access_token"]
+        except Exception as e:
+            print(f"❌ TDX Token 獲取失敗: {e}")
+            raise HTTPException(status_code=500, detail="無法取得 TDX 授權 Token")
+
+# ==========================================
+# API 路由區
+# ==========================================
 
 @app.get("/")
 def health_check():
-    return {"status": "Server is running smoothly!"}
+    return {"status": "Chiayi Transport Server is running smoothly!"}
 
+# ------------------------------------------
+# 🚌 公車預估到站時間
+# ------------------------------------------
 @app.get("/api/bus/eta/{city}/{route_id}")
 async def get_bus_eta(city: str, route_id: str):
+    token = await get_valid_token()
+    headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
     url = f"https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/{city}?$filter=RouteID eq '{route_id}'&$format=JSON"
-    async with httpx.AsyncClient() as client:
-        res = await client.get(url, headers=HEADERS)
-        if res.status_code != 200:
-            raise HTTPException(status_code=500, detail="TDX API Error")
 
-        # 呼叫轉換器瘦身
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail="TDX Bus ETA API Error")
+
         clean_data = transform_bus_eta(res.json())
         return {"data": clean_data}
 
+# ------------------------------------------
+# 🚲 YouBike 即時車位
+# ------------------------------------------
 @app.get("/api/bike/status/{city}")
 async def get_bike_status(city: str):
+    token = await get_valid_token()
+    headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
     url = f"https://tdx.transportdata.tw/api/basic/v2/Bike/Availability/City/{city}?$format=JSON"
+
     async with httpx.AsyncClient() as client:
-        res = await client.get(url, headers=HEADERS)
+        res = await client.get(url, headers=headers)
         if res.status_code != 200:
-            raise HTTPException(status_code=500, detail="TDX API Error")
+            raise HTTPException(status_code=res.status_code, detail="TDX YouBike API Error")
 
         clean_data = transform_youbike_status(res.json())
         return {"data": clean_data}
 
-# ... (台鐵與高鐵的路由寫法皆以此類推) ...
+# ------------------------------------------
+# 🚂 台鐵即時到離站資訊 (動態前後30分鐘)
+# ------------------------------------------
+@app.get("/api/rail/tra/live/{station_id}")
+async def get_tra_live(station_id: str):
+    token = await get_valid_token()
+    headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
+    url = f"https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/LiveBoard/Station/{station_id}?$format=JSON"
+
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail="TDX TRA Live API Error")
+
+        clean_data = transform_tra_live(res.json())
+        return {"data": clean_data}
+
+# ------------------------------------------
+# 🚄 高鐵特定日期時刻表
+# ------------------------------------------
+@app.get("/api/rail/thsr/timetable/{station_id}/{train_date}")
+async def get_thsr_timetable(station_id: str, train_date: str):
+    token = await get_valid_token()
+    headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
+    # train_date 格式需為 YYYY-MM-DD
+    url = f"https://tdx.transportdata.tw/api/basic/v2/Rail/THSR/DailyTimetable/Station/{station_id}/{train_date}?$format=JSON"
+
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail="TDX THSR Timetable API Error")
+
+        clean_data = transform_thsr_timetable(res.json())
+        return {"data": clean_data}
+
+# ------------------------------------------
+# ⚠️ 台鐵即時營運通阻資訊
+# ------------------------------------------
+@app.get("/api/rail/tra/alert")
+async def get_tra_alert():
+    token = await get_valid_token()
+    headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
+    url = "https://tdx.transportdata.tw/api/basic/v2/Rail/TRA/Alert?$format=JSON"
+
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail="TDX TRA Alert API Error")
+
+        clean_data = transform_tra_alert(res.json())
+        return {"data": clean_data}
+
+# ------------------------------------------
+# ⚠️ 高鐵即時營運通阻資訊
+# ------------------------------------------
+@app.get("/api/rail/thsr/alert")
+async def get_thsr_alert():
+    token = await get_valid_token()
+    headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
+    url = "https://tdx.transportdata.tw/api/basic/v2/Rail/THSR/Alert?$format=JSON"
+
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail="TDX THSR Alert API Error")
+
+        clean_data = transform_thsr_alert(res.json())
+        return {"data": clean_data}
+
+# ------------------------------------------
+# ⚠️ 公車即時營運通阻資訊
+# ------------------------------------------
+@app.get("/api/bus/alert/{city}")
+async def get_bus_alert(city: str):
+    token = await get_valid_token()
+    headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
+    url = f"https://tdx.transportdata.tw/api/basic/v2/Bus/Alert/City/{city}?$format=JSON"
+
+    async with httpx.AsyncClient() as client:
+        res = await client.get(url, headers=headers)
+        if res.status_code != 200:
+            raise HTTPException(status_code=res.status_code, detail="TDX Bus Alert API Error")
+
+        clean_data = transform_bus_alert(res.json())
+        return {"data": clean_data}

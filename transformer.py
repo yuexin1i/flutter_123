@@ -60,3 +60,44 @@ def transform_thsr_timetable(raw_data: list) -> list:
             "departureTime": item.get("DepartureTime", "")
         })
     return slim_data
+
+def transform_tra_alert(data):
+    """整理台鐵通阻資訊"""
+    alerts = []
+    for item in data:
+        alerts.append({
+            "title": item.get("Title"),
+            "description": item.get("Description"),
+            "status": item.get("Status", "1"), # 1: 預警, 2: 發生中, 3: 處理中, 4: 排除中, 5: 已排除
+            "publish_time": item.get("PublishTime"),
+            "update_time": item.get("UpdateTime"),
+            "effect_lines": [line.get("LineID") for line in item.get("EffectLines", [])]
+        })
+    return alerts
+
+def transform_thsr_alert(data):
+    """整理高鐵通阻資訊"""
+    alerts = []
+    for item in data:
+        alerts.append({
+            "title": item.get("Title"),
+            "description": item.get("Description"),
+            "status": item.get("Status", "1"),
+            "publish_time": item.get("PublishTime"),
+            "update_time": item.get("UpdateTime"),
+            "direction": item.get("Direction", 0) # 0: 雙向, 1: 南下, 2: 北上
+        })
+    return alerts
+
+def transform_bus_alert(data):
+    """整理公車通阻資訊"""
+    alerts = []
+    for item in data:
+        alerts.append({
+            "title": item.get("Title"),
+            "description": item.get("Description"),
+            "start_time": item.get("StartTime"),
+            "end_time": item.get("EndTime"),
+            "effect_routes": [route.get("RouteName", {}).get("Zh_tw") for route in item.get("EffectRoutes", [])]
+        })
+    return alerts
