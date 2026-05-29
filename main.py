@@ -4,19 +4,21 @@ from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import os
 import time
+
+# 引入 transformer.py 中的所有資料瘦身函式
 from transformer import (
     transform_bus_eta,
     transform_youbike_status,
     transform_tra_live,
     transform_thsr_timetable,
-    transform_tra_alert,     # 新增
-    transform_thsr_alert,    # 新增
-    transform_bus_alert      # 新增
+    transform_tra_alert,
+    transform_thsr_alert,
+    transform_bus_alert
 )
 
 app = FastAPI(title="Chiayi Transport Middleware API")
 
-# 允許 Flutter 跨網域請求
+# 允許 Flutter 跨網域請求 (解決 CORS 錯誤)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,11 +29,11 @@ app.add_middleware(
 # ==========================================
 # TDX Token 管理機制
 # ==========================================
-# ⚠️ 請確保在環境變數中設定這兩個值
+# ⚠️ 請確保在環境變數 (Environment Variables) 中設定這兩個值
 TDX_CLIENT_ID = os.getenv("TDX_CLIENT_ID", "YOUR_CLIENT_ID")
 TDX_CLIENT_SECRET = os.getenv("TDX_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
 
-# 儲存 Token 及其過期時間
+# 儲存 Token 及其過期時間 (快取機制)
 _token_cache = {
     "access_token": None,
     "expires_at": 0
@@ -68,7 +70,7 @@ async def get_valid_token():
             raise HTTPException(status_code=500, detail="無法取得 TDX 授權 Token")
 
 # ==========================================
-# API 路由區
+# API 路由區 (Endpoints)
 # ==========================================
 
 @app.get("/")
@@ -76,7 +78,7 @@ def health_check():
     return {"status": "Chiayi Transport Server is running smoothly!"}
 
 # ------------------------------------------
-# 🚌 公車預估到站時間
+# 🚌 1. 公車預估到站時間
 # ------------------------------------------
 @app.get("/api/bus/eta/{city}/{route_id}")
 async def get_bus_eta(city: str, route_id: str):
@@ -93,7 +95,7 @@ async def get_bus_eta(city: str, route_id: str):
         return {"data": clean_data}
 
 # ------------------------------------------
-# 🚲 YouBike 即時車位
+# 🚲 2. YouBike 即時車位
 # ------------------------------------------
 @app.get("/api/bike/status/{city}")
 async def get_bike_status(city: str):
@@ -110,7 +112,7 @@ async def get_bike_status(city: str):
         return {"data": clean_data}
 
 # ------------------------------------------
-# 🚂 台鐵即時到離站資訊 (動態前後30分鐘)
+# 🚂 3. 台鐵即時到離站資訊 (動態前後30分鐘)
 # ------------------------------------------
 @app.get("/api/rail/tra/live/{station_id}")
 async def get_tra_live(station_id: str):
@@ -127,7 +129,7 @@ async def get_tra_live(station_id: str):
         return {"data": clean_data}
 
 # ------------------------------------------
-# 🚄 高鐵特定日期時刻表
+# 🚄 4. 高鐵特定日期時刻表
 # ------------------------------------------
 @app.get("/api/rail/thsr/timetable/{station_id}/{train_date}")
 async def get_thsr_timetable(station_id: str, train_date: str):
@@ -145,7 +147,7 @@ async def get_thsr_timetable(station_id: str, train_date: str):
         return {"data": clean_data}
 
 # ------------------------------------------
-# ⚠️ 台鐵即時營運通阻資訊
+# ⚠️ 5. 台鐵即時營運通阻資訊
 # ------------------------------------------
 @app.get("/api/rail/tra/alert")
 async def get_tra_alert():
@@ -162,7 +164,7 @@ async def get_tra_alert():
         return {"data": clean_data}
 
 # ------------------------------------------
-# ⚠️ 高鐵即時營運通阻資訊
+# ⚠️ 6. 高鐵即時營運通阻資訊
 # ------------------------------------------
 @app.get("/api/rail/thsr/alert")
 async def get_thsr_alert():
@@ -179,7 +181,7 @@ async def get_thsr_alert():
         return {"data": clean_data}
 
 # ------------------------------------------
-# ⚠️ 公車即時營運通阻資訊
+# ⚠️ 7. 公車即時營運通阻資訊
 # ------------------------------------------
 @app.get("/api/bus/alert/{city}")
 async def get_bus_alert(city: str):
