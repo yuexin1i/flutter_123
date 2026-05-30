@@ -1,19 +1,41 @@
 # transformer.py
 
 def transform_bus_eta(raw_data: list) -> list:
-    """轉換公車預估到站時間"""
+    """轉換公車預估到站時間 (配合 Flutter 模型)"""
     slim_data = []
     for item in raw_data:
         slim_data.append({
+            "stopUID": item.get("StopUID", ""),
+            "routeUID": item.get("RouteUID", ""),
             "plateNumb": item.get("PlateNumb", ""),
-            "routeNameZh": item.get("RouteName", {}).get("Zh_tw", ""),
-            "stopNameZh": item.get("StopName", {}).get("Zh_tw", ""),
-            "direction": item.get("Direction", 0),
-            "estimateTime": item.get("EstimateTime", -1), # 預估到站秒數，-1代表無資料
-            "status": item.get("StopStatus", 0) # 0:正常, 1:尚未發車, 2:交管不停, 3:末班車已過, 4:今日未營運
+            "direction": item.get("Direction", -1),
+            "estimateTime": item.get("EstimateTime"), # 保持為 None (null)，讓前端判斷
+            "stopStatus": item.get("StopStatus", -1),
+            "nextBusTime": item.get("NextBusTime"),
+            "isLastBus": item.get("IsLastBus", False)
         })
     return slim_data
 
+def transform_bus_alert(data):
+    """整理公車通阻資訊 (配合 Flutter 模型)"""
+    alerts = []
+    for item in data:
+        scope = item.get("Scope", {})
+
+        # 💡 在後端直接把複雜的字典解析成純字串 ID 清單
+        affected_route_ids = [str(r.get("RouteID", "")) for r in scope.get("Routes", [])] if "Routes" in scope else []
+        affected_stop_ids = [str(s.get("StopID", "")) for s in scope.get("Stops", [])] if "Stops" in scope else []
+
+        alerts.append({
+            "alertID": item.get("AlertID", ""),
+            "title": item.get("Title", "營運通阻公告"),
+            "description": item.get("Description", ""),
+            "startTime": item.get("StartTime", ""), # 統一改為 camelCase
+            "endTime": item.get("EndTime", ""),     # 統一改為 camelCase
+            "affectedRouteIDs": affected_route_ids,
+            "affectedStopIDs": affected_stop_ids
+        })
+    return alerts
 
 def transform_youbike_status(raw_data: list) -> list:
     """轉換 YouBike 即時車位狀態"""
@@ -29,27 +51,53 @@ def transform_youbike_status(raw_data: list) -> list:
 
 
 def transform_tra_live(raw_data: list) -> list:
-    """轉換台鐵即時到離站看版"""
+    """轉換台鐵即時到離站看版 (配合 Flutter 模型)"""
     slim_data = []
     for item in raw_data:
         slim_data.append({
+            "stationID": item.get("StationID", ""),
             "trainNo": item.get("TrainNo", ""),
             "direction": item.get("Direction", 0), # 0:順行, 1:逆行
-            "trainTypeName": item.get("TrainTypeName", {}).get("Zh_tw", ""),
-            "endingStationName": item.get("EndingStationName", {}).get("Zh_tw", ""),
+            # 這裡幫你把多層的字典攤平，直接送出字串，方便 Flutter 解析
+            "trainTypeNameZh": item.get("TrainTypeName", {}).get("Zh_tw", "未知車種"),
+            "tripLine": item.get("TripLine", 0), # 山線/海線等
+            "endingStationZh": item.get("EndingStationName", {}).get("Zh_tw", ""),
             "scheduledArrivalTime": item.get("ScheduledArrivalTime", ""),
-            "delayTime": item.get("DelayTime", 0) # 誤點幾分鐘，0代表準點
+            "scheduledDepartureTime": item.get("ScheduledDepartureTime", ""),
+            "delayTime": item.get("DelayTime", 0), # 誤點幾分鐘，0代表準點
+            "updateTime": item.get("UpdateTime", "")
         })
     return slim_data
 
+def transform_tra_alert(data):
+    """整理台鐵通阻資訊 (配合 Flutter 模型)"""
+    alerts = []
+    for item in data:
+        # 注意：TDX 的台鐵 Alert 格式可能跟高鐵不太一樣
+        # 這裡假設 TDX 傳來的欄位長得像你設定的 Model
+
+        inbound = item.get("Inbound", {})
+        outbound = item.get("Outbound", {})
+
+        alerts.append({
+            "serviceID": item.get("ServiceID", ""),
+            "serviceName": item.get("ServiceName", ""),
+            "inboundStatus": inbound.get("Status", 0),
+            "inboundReason": inbound.get("Reason", ""),
+            "outboundStatus": outbound.get("Status", 0),
+            "outboundReason": outbound.get("Reason", "")
+        })
+    return alerts
+
 
 def transform_thsr_timetable(raw_data: list) -> list:
-    """轉換高鐵每日時刻表"""
+    """轉換高鐵每日時刻表 (配合 Flutter 模型)"""
     slim_data = []
     for item in raw_data:
         slim_data.append({
             "trainNo": item.get("TrainNo", ""),
             "direction": item.get("Direction", 0), # 0:南下, 1:北上
+            # 幫你把字典攤平，直接送出中文站名字串
             "startingStationName": item.get("StartingStationName", {}).get("Zh_tw", ""),
             "endingStationName": item.get("EndingStationName", {}).get("Zh_tw", ""),
             "arrivalTime": item.get("ArrivalTime", ""),
@@ -57,52 +105,17 @@ def transform_thsr_timetable(raw_data: list) -> list:
         })
     return slim_data
 
-def transform_tra_alert(data):
-    """整理台鐵通阻資訊"""
-    alerts = []
-    for item in data:
-        alerts.append({
-            "title": item.get("Title", "無標題"),
-            "description": item.get("Description", ""),
-            "status": item.get("Status", "1"), # 1: 預警, 2: 發生中, 3: 處理中, 4: 排除中, 5: 已排除
-            "publish_time": item.get("PublishTime", ""),
-            "update_time": item.get("UpdateTime", ""),
-            "effect_lines": [line.get("LineID") for line in item.get("EffectLines", [])] if item.get("EffectLines") else []
-        })
-    return alerts
-
 def transform_thsr_alert(data):
-    """整理高鐵通阻資訊"""
+    """整理高鐵通阻資訊 (配合 Flutter 模型)"""
     alerts = []
     for item in data:
         alerts.append({
+            "alertID": item.get("AlertID", "0"),
             "title": item.get("Title", "全線營運正常"),
             "description": item.get("Description", ""),
-            "status": item.get("Status", "1"),
-            "publish_time": item.get("PublishTime", ""),
-            "update_time": item.get("UpdateTime", ""),
-            "direction": item.get("Direction", 0) # 0: 雙向, 1: 南下, 2: 北上
+            # 注意：TDX 回傳的 Status 可能是數字或字串，這裡統一轉字串配合你的型別
+            "status": str(item.get("Status", "正常")),
+            "alertURL": item.get("AlertURL", "")
         })
     return alerts
 
-def transform_bus_alert(data):
-    """整理公車通阻資訊"""
-    alerts = []
-    for item in data:
-        # TDX 公車的受影響路線通常包在 Scope 裡面，這裡做安全讀取
-        effect_routes = []
-        scope = item.get("Scope", {})
-        if "Routes" in scope:
-            effect_routes = [route.get("RouteName", {}).get("Zh_tw") for route in scope.get("Routes", [])]
-        elif "EffectRoutes" in item:
-            # 保留你原本的寫法作為備用，以防特定縣市的 JSON 結構不同
-            effect_routes = [route.get("RouteName", {}).get("Zh_tw") for route in item.get("EffectRoutes", [])]
-
-        alerts.append({
-            "title": item.get("Title", "無標題"),
-            "description": item.get("Description", ""),
-            "start_time": item.get("StartTime", ""),
-            "end_time": item.get("EndTime", ""),
-            "effect_routes": effect_routes
-        })
-    return alerts
