@@ -6,6 +6,7 @@ import os
 import time
 import asyncio
 
+
 from transformer import (
     transform_bus_eta,
     transform_youbike_status,
@@ -30,16 +31,26 @@ app.add_middleware(
 # ==========================================
 TDX_CLIENT_ID = os.getenv("TDX_CLIENT_ID", "YOUR_CLIENT_ID")
 TDX_CLIENT_SECRET = os.getenv("TDX_CLIENT_SECRET", "YOUR_CLIENT_SECRET")
-
 _token_cache = {
     "access_token": None,
-    "expires_at": 0
+    "expires_at": 0,
+    "lock": None
 }
 
 async def get_valid_token():
     current_time = time.time()
     if _token_cache["access_token"] and current_time < _token_cache["expires_at"] - 300:
         return _token_cache["access_token"]
+
+    # 2. 懶加載 Lock (必須在 FastAPI 的 Event Loop 啟動後建立，否則會報錯)
+    if _token_cache["lock"] is None:
+        _token_cache["lock"] = asyncio.Lock()
+
+    # 3. 加鎖後雙重檢查 (Double-checked locking)
+    async with _token_cache["lock"]:
+        current_time = time.time()
+        if _token_cache["access_token"] and current_time < _token_cache["expires_at"] - 300:
+            return _token_cache["access_token"]
 
     token_url = 'https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token'
     data = {
@@ -117,16 +128,19 @@ def health_check():
 # ------------------------------------------
 # 🚌 1. 公車預估到站時間
 # ------------------------------------------
-@app.get("/api/bus/eta/{city}/{route_id}")
-async def get_bus_eta(city: str, route_id: str):
-    cache_key = f"bus_eta:{city}:{route_id}"
+@app.get("/api/bus/eta/{city}/{route_uid}")
+async def get_bus_eta(city: str, route_uid: str):
+    cache_key = f"bus_eta:{city}:{route_uid}"
 
     async def fetcher():
         token = await get_valid_token()
         headers = {"authorization": f"Bearer {token}", "Accept-Encoding": "gzip"}
-        url = f"https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/{city}?$filter=RouteID eq '{route_id}'&$format=JSON"
+        url = f"https://tdx.transportdata.tw/api/basic/v2/Bus/EstimatedTimeOfArrival/City/{city}"
+        # 使用 params 確保空格和符號被正確編碼
+        params = {"$filter": f"RouteUID eq '{route_uid}'", "$format": "JSON"}
+
         async with httpx.AsyncClient() as client:
-            res = await client.get(url, headers=headers)
+            res = await client.get(url, headers=headers, params=params)
             if res.status_code != 200:
                 raise HTTPException(status_code=res.status_code, detail="TDX Bus ETA API Error")
             return transform_bus_eta(res.json())
