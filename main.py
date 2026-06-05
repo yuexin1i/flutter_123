@@ -205,7 +205,10 @@ async def get_thsr_timetable(station_id: str, train_date: str):
         async with httpx.AsyncClient() as client:
             res = await client.get(url, headers=headers)
             if res.status_code != 200:
-                raise HTTPException(status_code=res.status_code, detail="TDX THSR Timetable API Error")
+                # 🌟 讓後端印出真正的 TDX 錯誤，並傳送給手機端！
+                error_msg = res.text
+                print(f"🚨 TDX 高鐵 API 真正錯誤: {error_msg}")
+                raise HTTPException(status_code=res.status_code, detail=f"TDX 拒絕存取: {error_msg}")
             return transform_thsr_timetable(res.json())
 
     data, from_cache = await get_cached(cache_key, fetcher, ttl=600)  # 時刻表 10 分鐘快取

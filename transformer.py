@@ -58,10 +58,11 @@ def transform_tra_live(raw_data: list) -> list:
             "stationID": item.get("StationID", ""),
             "trainNo": item.get("TrainNo", ""),
             "direction": item.get("Direction", 0), # 0:順行, 1:逆行
-            # 這裡幫你把多層的字典攤平，直接送出字串，方便 Flutter 解析
             "trainTypeNameZh": item.get("TrainTypeName", {}).get("Zh_tw", "未知車種"),
+            "trainTypeNameEn": item.get("TrainTypeName", {}).get("En", ""), # 🌟 新增：提取車種英文
             "tripLine": item.get("TripLine", 0), # 山線/海線等
             "endingStationZh": item.get("EndingStationName", {}).get("Zh_tw", ""),
+            "endingStationEn": item.get("EndingStationName", {}).get("En", ""), # 🌟 新增：提取終點站英文
             "scheduledArrivalTime": item.get("ScheduledArrivalTime", ""),
             "scheduledDepartureTime": item.get("ScheduledDepartureTime", ""),
             "delayTime": item.get("DelayTime", 0), # 誤點幾分鐘，0代表準點
@@ -97,9 +98,10 @@ def transform_thsr_timetable(raw_data: list) -> list:
         slim_data.append({
             "trainNo": item.get("TrainNo", ""),
             "direction": item.get("Direction", 0), # 0:南下, 1:北上
-            # 幫你把字典攤平，直接送出中文站名字串
             "startingStationName": item.get("StartingStationName", {}).get("Zh_tw", ""),
+            "startingStationNameEn": item.get("StartingStationName", {}).get("En", ""), # 🌟 新增：提取起點站英文
             "endingStationName": item.get("EndingStationName", {}).get("Zh_tw", ""),
+            "endingStationNameEn": item.get("EndingStationName", {}).get("En", ""), # 🌟 新增：提取終點站英文
             "arrivalTime": item.get("ArrivalTime", ""),
             "departureTime": item.get("DepartureTime", "")
         })
